@@ -1,0 +1,71 @@
+{
+  "name": "queen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Queen - Claude Code orchestration desktop",
+  "main": "out/main/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "package": "electron-vite build && electron-builder --mac --dir",
+    "package:dmg": "electron-vite build && electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "@xterm/xterm": "^6.0.0",
+    "chokidar": "^6.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.25.10",
+    "zustand": "^5.1.0"
+  },
+  "build": {
+    "appId": "com.queen.desktop",
+    "productName": "Queen",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "package.json",
+      "!node_modules/tree-sitter-wasms/**"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/tree-sitter-wasms/out",
+        "to": "grammars",
+        "filter": [
+          "tree-sitter-typescript.wasm",
+          "tree-sitter-tsx.wasm",
+          "tree-sitter-javascript.wasm",
+          "tree-sitter-python.wasm"
+        ]
+      }
+    ],
+    "electronDist": "node_modules/electron/dist",
+    "mac": {
+      "target": [
+        "dir"
+      ],
+      "identity": null,
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png"
+    },
+    "asar": true
+  }
+}
