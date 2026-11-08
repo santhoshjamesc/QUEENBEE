@@ -5,7 +5,7 @@ import { watch, type FSWatcher } from 'chokidar'
 import type { Store } from '../store'
 import type { SessionManager } from '../sessions'
 import type { Control, Reg } from './control'
-import type { Decision } from './permission'
+import { real, type Decision } from './permission'
 import type { TaskStore } from './tasks'
 import { LeaseTable } from './leases'
 import { classifyWrite } from './scope'
@@ -77,7 +77,7 @@ export class Watchdog extends EventEmitter {
     const fp = String(input?.file_path ?? input?.notebook_path ?? '')
     if (!task || !fp) return undefined
     let root: string; try { root = realpathSync(reg.projectRoot) } catch { root = reg.projectRoot }
-    const abs = isAbsolute(fp) ? fp : resolve(root, fp)
+    const abs = real(isAbsolute(fp) ? fp : resolve(root, fp)) // symlinks resolved so scope/profile/lease checks see the true file
 
     const prof = this.profileOf?.(reg.sessionId)
     const pv = prof && profileViolation(prof, root, abs)

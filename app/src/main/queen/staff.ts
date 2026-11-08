@@ -3,12 +3,11 @@ import type { TaskStore } from './tasks'
 import { inScope } from './scope'
 
 /**
- * Staff (hires) and the coin economy.
+ * Staff (hires). Hiring is free and unlimited.
  * The roster and the wallet are company-wide: every window (every Queen run) sees the same workers, and a worker
  * does one task at a time across ALL windows. A hire is a real, persisted agent record with its own look, desk and
  * profile (focus, instructions, allowed / blocked paths). Its Claude session is started by Queen's assign_task
- * (the plan-approval gate still applies) and bound to the hire. Coins are derived from real data only
- * (verified tasks, delivered messages) minus what hires cost.
+ * (the plan-approval gate still applies) and bound to the hire.
  */
 export interface Hire {
   id: string
@@ -25,14 +24,9 @@ export interface Hire {
   deny: string[]
 }
 export interface HireProfile { focus?: string; instructions?: string; allow?: string[] | string; deny?: string[] | string }
-export interface Economy { coins: number; earned: number; spent: number; nextCost: number; hires: number }
 
-export const START_COINS = 150
-export const REWARD_VERIFIED = 30
-export const REWARD_MESSAGE = 5
-export const TITLES = ['Developer', 'Designer', 'Tester', 'Writer', 'Researcher', 'Head of workers'] as const
+export const TITLES = ['Senior developer', 'Developer', 'Code reviewer', 'QA', 'Tester', 'BA', 'Designer', 'Writer', 'Researcher', 'Head of workers'] as const
 const NAMES = ['Ada', 'Linus', 'Grace', 'Alan', 'Margaret', 'Dennis', 'Barbara', 'Ken', 'Radia', 'Edsger', 'Hedy', 'Tim']
-export const hireCost = (existing: number) => 50 + 25 * existing
 const MAX_GLOBS = 30
 
 /** Validates user-typed globs: relative to the project, no escaping it. */
@@ -66,6 +60,8 @@ export function fitsScope(h: Pick<Hire, 'allow' | 'deny'>, scope: string[]): boo
 }
 
 export class Staff {
+  /** Is this session's process still alive? Unset = assume yes. A dead session's unfinished task must not keep its hire busy forever. */
+  alive?: (sessionId: string) => boolean
   constructor(private db: DatabaseSync, private tasks: TaskStore) {}
 
   /** The whole company roster. `_runId` is accepted for call-site compatibility; the roster is shared by all windows. */
@@ -76,30 +72,21 @@ export class Staff {
     }))
   }
 
-  economy(_runId?: string): Economy {
-    const hires = this.list()
-    const earned = this.tasks.verifiedCount() * REWARD_VERIFIED + this.tasks.deliveredCount() * REWARD_MESSAGE
-    const spent = hires.reduce((a, h) => a + h.cost, 0)
-    return { coins: START_COINS + earned - spent, earned, spent, nextCost: hireCost(hires.length), hires: hires.length }
-  }
-
   hire(runId: string, name: string, title: string, profile: HireProfile = {}, now = Date.now()): Hire {
     const hires = this.list()
-    const eco = this.economy()
     const nm = name.trim().slice(0, 30) || NAMES.find((n) => !hires.some((h) => h.name === n)) || `Worker ${hires.length + 1}`
     if (hires.some((h) => h.name.toLowerCase() === nm.toLowerCase())) throw new Error(`${nm} already works here`)
     const focus = String(profile.focus ?? '').trim().slice(0, 80)
     const instructions = String(profile.instructions ?? '').trim().slice(0, 2000)
     const allow = cleanGlobs(profile.allow, 'Only work in'), deny = cleanGlobs(profile.deny, 'Never touch')
-    if (eco.coins < eco.nextCost) throw new Error(`Not enough coins: hiring costs ${eco.nextCost}, you have ${eco.coins}. Verified tasks earn ${REWARD_VERIFIED} each.`)
     const ttl = (TITLES as readonly string[]).includes(title) ? title : 'Developer'
     let n = hires.length + 1
     while (hires.some((h) => h.id === 'H' + n)) n++
     const id = 'H' + n
     const look = Math.floor(Math.random() * 1000)
     this.db.prepare('INSERT INTO hires (id,run_id,name,title,look,cost,ts,focus,instructions,allow,deny) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(id, runId, nm, ttl, look, eco.nextCost, now, focus, instructions, JSON.stringify(allow), JSON.stringify(deny))
-    return { id, runId, name: nm, title: ttl, look, cost: eco.nextCost, ts: now, focus, instructions, allow, deny }
+      .run(id, runId, nm, ttl, look, 0, now, focus, instructions, JSON.stringify(allow), JSON.stringify(deny))
+    return { id, runId, name: nm, title: ttl, look, cost: 0, ts: now, focus, instructions, allow, deny }
   }
 
   /** Change a hire's configuration later (name, title and look stay). */
@@ -113,6 +100,13 @@ export class Staff {
     return { ...h, focus, instructions, allow, deny }
   }
 
+  /** Remove a hire from the company roster. Refused while they are working on an unfinished task. */
+  remove(hireId: string): void {
+    const h = this.list().find((x) => x.id === hireId); if (!h) throw new Error('unknown hire ' + hireId)
+    if (this.busyIds().has(h.id)) throw new Error(`${h.name} is busy with a task; wait until it finishes (or stop it) before removing them`)
+    this.db.prepare('DELETE FROM hires WHERE id=?').run(h.id)
+  }
+
   bind(hire: Pick<Hire, 'runId' | 'id'>, sessionId: string): void {
     this.db.prepare('UPDATE hires SET session_id=? WHERE run_id=? AND id=?').run(sessionId, hire.runId, hire.id)
   }
@@ -124,7 +118,7 @@ export class Staff {
   busyIds(_runId?: string): Set<string> {
     const active = this.tasks.activeAssignees()
     const busy = new Set<string>()
-    for (const h of this.list()) if (h.sessionId && active.has(h.sessionId)) busy.add(h.id)
+    for (const h of this.list()) if (h.sessionId && active.has(h.sessionId) && (this.alive?.(h.sessionId) ?? true)) busy.add(h.id)
     return busy
   }
 

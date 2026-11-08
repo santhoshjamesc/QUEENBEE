@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { openDb } from '../src/main/db'
 import { TaskStore } from '../src/main/queen/tasks'
-import { Staff, START_COINS, REWARD_VERIFIED, hireCost } from '../src/main/queen/staff'
+import { Staff } from '../src/main/queen/staff'
 import { Chat, threadOf } from '../src/main/queen/chat'
 import { deriveOffice, layoutOffice, needsAnimation, WALK_IN_MS, type OfficeInputs } from '../src/shared/office'
 
@@ -13,21 +13,14 @@ const setup = () => {
   return { db, tasks, staff, chat, sent, live }
 }
 
-describe('hiring and coins', () => {
-  it('starts with a budget, charges a growing cost, refuses when broke, and earns from verified tasks only', () => {
-    const { staff, tasks } = setup()
-    expect(staff.economy('Q')).toMatchObject({ coins: START_COINS, nextCost: hireCost(0) })
-    const a = staff.hire('Q', 'Ada', 'Developer'); const b = staff.hire('Q', '', 'Head of workers')
-    expect(a.cost).toBe(50); expect(b.cost).toBe(75); expect(b.name).not.toBe('Ada')
-    expect(staff.economy('Q').coins).toBe(START_COINS - 125)
-    expect(() => staff.hire('Q', 'Third', 'Tester')).toThrow(/Not enough coins/)
-    expect(() => staff.hire('Q', 'ada', 'Tester')).toThrow(/already works/)
-    tasks.set('Q', 'T1', { status: 'working' }); expect(staff.economy('Q').earned).toBe(0) // working earns nothing
-    tasks.set('Q', 'T1', { status: 'verified' }); expect(staff.economy('Q').earned).toBe(REWARD_VERIFIED)
-    expect(staff.economy('Q').coins).toBe(55); expect(() => staff.hire('Q', 'Third', 'Tester')).toThrow(/you have 55/)
-    for (let i = 0; i < 9; i++) tasks.logMessage('Q', 'queen', 'T2', 'hi', true)   // delivered messages earn 5 each
-    tasks.logMessage('Q', 'queen', 'T2', 'lost', false); tasks.logMessage('Q', 'app', 'queen', 'note', true) // undelivered / app notices earn nothing
-    expect(staff.economy('Q').coins).toBe(100); expect(() => staff.hire('Q', 'Third', 'Tester')).not.toThrow()
+describe('hiring', () => {
+  it('is free and unlimited, with unique names', () => {
+    const { staff } = setup()
+    const hired = Array.from({ length: 12 }, () => staff.hire('Q', '', 'QA'))
+    expect(hired).toHaveLength(12); expect(hired.every((h) => h.cost === 0)).toBe(true)
+    expect(new Set(hired.map((h) => h.name)).size).toBe(12)
+    expect(() => staff.hire('Q', hired[0].name.toUpperCase(), 'Tester')).toThrow(/already works/)
+    expect(staff.hire('Q', 'Rev', 'Code reviewer').title).toBe('Code reviewer')
   })
   it('picks a free hire, respects busy ones, and errors on an unknown name', () => {
     const { staff, tasks } = setup()
@@ -42,6 +35,15 @@ describe('hiring and coins', () => {
 })
 
 describe('chat room', () => {
+  it('a dead session does not keep its hire busy', () => {
+    const { staff, tasks, live } = setup()
+    const a = staff.hire('Q', 'Ada', 'Developer'); staff.bind(a, 'sess-a'); tasks.set('Q', 'T1', { status: 'working', assignee: 'sess-a' })
+    staff.alive = (id) => live.has(id)
+    expect(staff.busyIds().has(a.id)).toBe(false)           // process gone, task never finished
+    expect(staff.pickFree('Q', 'Ada')?.id).toBe(a.id)
+    live.add('sess-a'); expect(staff.busyIds().has(a.id)).toBe(true)
+    live.delete('sess-a'); expect(() => staff.remove(a.id)).not.toThrow()
+  })
   it('merges routed messages and boss chat; maps tasks to hires; threads are pairs', () => {
     const { staff, tasks, chat, live } = setup()
     const a = staff.hire('Q', 'Ada', 'Developer'); staff.bind(a, 'sess-a'); tasks.set('Q', 'T1', { status: 'working', assignee: 'sess-a' }); live.add('sess-a')

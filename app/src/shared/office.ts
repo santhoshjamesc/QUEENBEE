@@ -41,6 +41,8 @@ export interface Character {
   seat: { kind: 'queen' | 'desk' | 'meeting'; index: number }
   /** desk a worker returns to when not in a meeting */
   desk?: number
+  /** watchdogs only: sessions with an open alert this dog is investigating (it walks to them) */
+  watching?: string[]
 }
 
 const LIVE = new Set(['spawning', 'idle', 'working'])
@@ -108,7 +110,7 @@ export function deriveOffice(i: OfficeInputs): Character[] {
     const open = i.alerts.filter((a) => a.status === 'open')
     for (const n of [1, 2]) {
       const mine = open.filter((_, k) => k % 2 === n - 1)
-      out.push({ sessionId: 'watchdog:' + n, role: 'watchdog', name: n === 1 ? 'Rex' : 'Bolt', state: mine.length ? 'working' : 'idle', seat: { kind: 'queen', index: n },
+      out.push({ sessionId: 'watchdog:' + n, role: 'watchdog', name: n === 1 ? 'Rex' : 'Bolt', state: mine.length ? 'working' : 'idle', watching: mine.map((a) => a.sessionId).filter((x): x is string => !!x), seat: { kind: 'queen', index: n },
         reason: mine.length ? `investigating open alert: ${mine.map((a) => a.rule + ' (' + a.confidence + ')').join(', ')}` : 'on watch: no open alerts' })
     }
   }

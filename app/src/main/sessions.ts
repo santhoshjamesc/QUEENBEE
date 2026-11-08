@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import type { SessionInfo, StartSessionOptions } from '../shared/types'
 import { ClaudeSession } from './claude/session'
 import type { Control } from './queen/control'
-import { QUEEN_PROMPT } from './queen/control'
+import { QUEEN_PROMPT, QUEEN_RULES_UPDATE, RULES_VERSION } from './queen/control'
 import type { Store } from './store'
 
 export class SessionManager extends EventEmitter {
@@ -49,6 +49,7 @@ export class SessionManager extends EventEmitter {
       // plugin exposes exactly the assigned ones as queen:<name>. --settings/--mcp-config still apply.
       if (role === 'worker' && opts.skillPluginDir) extra.push('--setting-sources', '', '--plugin-dir', opts.skillPluginDir)
     }
+    if (role === 'queen') this.setRulesVersion(s.info.id) // a fresh spawn already carries the current prompt
     this.live.set(s.info.id, s)
     s.on('event', (e) => this.emit('event', e))
     s.on('status', () => this.emit('status', s.info))
@@ -66,7 +67,23 @@ export class SessionManager extends EventEmitter {
   }
   isPaused(id: string): boolean { return !!this.control?.isPaused(id) }
 
+  private setRulesVersion(id: string): void {
+    try { this.store.raw.prepare('INSERT OR REPLACE INTO queen_rules (session_id, version) VALUES (?, ?)').run(id, RULES_VERSION) } catch { /* table missing in odd test dbs */ }
+  }
+  /** A Queen that started before the rules changed gets a one-time briefing, prepended to the next message sent to her. */
+  private withRulesUpdate(id: string, text: string): string {
+    const s = this.live.get(id)
+    if (s?.info.role !== 'queen') return text
+    try {
+      const r = this.store.raw.prepare('SELECT version FROM queen_rules WHERE session_id=?').get(id) as { version: number } | undefined
+      if ((r?.version ?? 0) >= RULES_VERSION) return text
+      this.setRulesVersion(id)
+      return QUEEN_RULES_UPDATE + '\n\n' + text
+    } catch { return text }
+  }
+
   send(id: string, text: string): void {
+    text = this.withRulesUpdate(id, text)
     if (this.isPaused(id)) { this.get(id); this.queued.set(id, [...(this.queued.get(id) ?? []), text]); return }
     this.get(id).send(text)
   }

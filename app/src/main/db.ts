@@ -76,7 +76,9 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE hires ADD COLUMN focus TEXT NOT NULL DEFAULT '';
    ALTER TABLE hires ADD COLUMN instructions TEXT NOT NULL DEFAULT '';
    ALTER TABLE hires ADD COLUMN allow TEXT NOT NULL DEFAULT '[]';
-   ALTER TABLE hires ADD COLUMN deny TEXT NOT NULL DEFAULT '[]';`
+   ALTER TABLE hires ADD COLUMN deny TEXT NOT NULL DEFAULT '[]';`,
+  // v9: which version of Queen's rules each session was last briefed with
+  `CREATE TABLE queen_rules (session_id TEXT PRIMARY KEY, version INTEGER NOT NULL);`
 ]
 
 export function openDb(path: string): DatabaseSync {

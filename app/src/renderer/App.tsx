@@ -57,7 +57,6 @@ export function App() {
   const [chatFocus, setChatFocus] = useState('boss:queen')
   const [loaded, setLoaded] = useState(false)
   const autoQueen = useRef<string | null>(null)
-  const [coins, setCoins] = useState<number | null>(null)
   const [dockOpen, setDockOpen] = useState(true)
   const [assigned, setAssigned] = useState<{ taskId: string; skill: string }[]>([])
   const logRef = useRef<HTMLDivElement>(null)
@@ -111,12 +110,6 @@ export function App() {
     }
     go().catch((e) => setErr(String(e.message ?? e)))
   }, [loaded, project, bin, sessions])
-  const qId = sessions.find((x) => x.role === 'queen')?.id
-  useEffect(() => {
-    if (!qId) return
-    const t = () => window.queen.staffState(qId).then((x) => setCoins(x.economy.coins)).catch(() => {})
-    t(); const i = setInterval(t, 2000); return () => clearInterval(i)
-  }, [qId])
 
   const run = async (f: () => Promise<unknown>) => { setErr(''); try { await f() } catch (e: any) { setErr(String(e.message ?? e)) } }
   const cur = sessions.find((s) => s.id === sel)
@@ -159,7 +152,6 @@ export function App() {
           ))}
         </nav>
         <span className="spacer" />
-        {coins !== null && <span className="pill warn" title="Coins: earned from verified tasks, spent on hires">🪙 {coins}</span>}
         <button className="primary sm" onClick={() => { setChatFocus('boss:queen'); setView('chat') }}>♛ Chat with Queen</button>
         {rate && <span className={'pill ' + (rate.info?.status === 'allowed' ? 'ok' : 'warn')} title="From the latest rate_limit_event emitted by Claude Code">
           Rate limit {rate.info?.status ?? '?'}{rate.info?.resetsAt ? ` · resets ${new Date(rate.info.resetsAt * 1000).toLocaleTimeString()}` : ''}</span>}

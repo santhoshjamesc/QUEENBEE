@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { resolve } from 'node:path'
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { LeaseTable } from '../src/main/queen/leases'
 import { classifyWrite, inScope } from '../src/main/queen/scope'
@@ -71,6 +71,18 @@ async function setup(o: { now?: () => number; inactivityMs?: number } = {}) {
 }
 
 describe('Watchdog policy (hook-time)', () => {
+  it('symlinks are resolved: a link inside scope cannot reach an out-of-scope file, and a link shares its target\'s lease', async () => {
+    const { root, wd, q, hook, worker, done } = await setup()
+    symlinkSync(resolve(root, 'src/zzz.ts'), resolve(root, 'src/a-alias.ts'))   // looks like it matches src/a*, targets zzz
+    symlinkSync(resolve(root, 'src/a.ts'), resolve(root, 'src/a-link.ts'))
+    const w1 = await worker('T1') // scope: src/a.ts only
+    const bad = await hook(w1, 'Write', { file_path: root + '/src/a-alias.ts' })
+    expect(bad.permissionDecision).toBe('deny'); expect(bad.permissionDecisionReason).toMatch(/outside task scope/)
+    expect((await hook(w1, 'Write', { file_path: root + '/src/a-link.ts' })).permissionDecision).toBe('allow')
+    expect(wd.leases.heldBy(resolve(root, 'src/a.ts'))).toBe(w1) // lease keyed by the real path
+    expect(wd.alerts(q.id).some((a) => a.rule === 'out-of-scope-write')).toBe(true)
+    done()
+  })
   it('out-of-scope write denied with evidence + alert; in-scope allowed; dependency/manifest allowed with note only', async () => {
     const { root, wd, q, hook, worker, done } = await setup()
     const w1 = await worker('T1')

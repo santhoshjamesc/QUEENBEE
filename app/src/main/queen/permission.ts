@@ -20,7 +20,7 @@ const SENSITIVE_BASH: [RegExp, string][] = [
   [/\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|\n]*\|\s*(iex|Invoke-Expression)\b/i, 'pipe download to shell (PowerShell)']
 ]
 
-function real(p: string): string {
+export function real(p: string): string {
   try { return realpathSync(p) } catch {
     try { return resolve(realpathSync(dirname(p)), p.slice(dirname(p).length + 1)) } catch { return resolve(p) }
   }

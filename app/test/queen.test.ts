@@ -57,6 +57,18 @@ describe('Control + gate', () => {
     fetch(`http://127.0.0.1:${c.port}/mcp/${token}`, { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) }).then((r) => r.json() as any)
   const until = async (f: () => boolean) => { const t = Date.now(); while (!f()) { if (Date.now() - t > 5000) throw new Error('timeout'); await new Promise((r) => setTimeout(r, 10)) } }
 
+  it('briefs a Queen from before a rules change exactly once, and never a fresh one', async () => {
+    const c = new Control(); await c.listen()
+    const store = new Store(openDb(':memory:'))
+    const mgr = new SessionManager(store, FAKE, 5, c, resolve(__dirname, '../src/main/queen/hook-bridge.js'))
+    const q = mgr.start({ name: 'queen', cwd: process.cwd(), role: 'queen' })
+    const sent: string[] = []; const live: any = (mgr as any).live.get(q.id); live.send = (m: string) => sent.push(m)
+    mgr.send(q.id, 'hi'); expect(sent).toEqual(['hi']) // fresh spawn already has the new prompt
+    store.raw.prepare('DELETE FROM queen_rules').run() // simulate a Queen started before the update
+    mgr.send(q.id, 'hello'); mgr.send(q.id, 'again')
+    expect(sent[1]).toContain('Rules update'); expect(sent[1]).toContain('hello'); expect(sent[2]).toBe('again')
+    mgr.stopAll()
+  })
   it('worker spawn refused before approval, allowed after; full ask→plan→approve flow over MCP', async () => {
     const c = new Control(); await c.listen()
     const store = new Store(openDb(':memory:'))

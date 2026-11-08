@@ -201,3 +201,6 @@ tr:last-child td { border-bottom: 0 }
 .ask-pair { display: flex; flex-direction: column; gap: 10px }
 .ask-reply { display: flex; gap: 8px; align-self: stretch; padding: 4px 0 }
 .ask-reply input { flex: 1; padding: 9px 12px; border-radius: 10px; border-color: var(--bee) }
+.role-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-top: 8px }
+.role { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; text-align: left; padding: 10px 12px; height: auto }
+.role .muted { font-size: 12px; white-space: normal }

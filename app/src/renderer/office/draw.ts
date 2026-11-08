@@ -1,4 +1,8 @@
 import type { Character, OfficeLayout, OfficeState } from '../../shared/office'
+import { animate } from './motion'
+
+// per-character pose inputs set just before each draw (walking gait, facing, talking)
+let WALKING = false, STEP = 0, LOOK = 0, TALK = false
 
 /** Canvas renderer. Draws ONLY what deriveOffice/layoutOffice say; `frame` just alternates a pose of states that are really active. */
 const GLYPH: Record<string, string[]> = {
@@ -49,7 +53,8 @@ const shade = (hex: string, k: number) => { // darken (k<0) / lighten (k>0) #rrg
   return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => f(v).toString(16).padStart(2, '0')).join('')
 }
 
-export function drawOffice(g: CanvasRenderingContext2D, L: OfficeLayout, cs: Character[], t: number): void {
+/** Draws one frame and returns where each character currently is (the canvas overlay's click targets follow them). */
+export function drawOffice(g: CanvasRenderingContext2D, L: OfficeLayout, cs: Character[], t: number): Record<string, { x: number; y: number }> {
   const frame = Math.floor(t / 300) % 2
   g.setTransform(SCALE, 0, 0, SCALE, 0, 0)
   g.clearRect(0, 0, L.width, L.height)
@@ -64,24 +69,37 @@ export function drawOffice(g: CanvasRenderingContext2D, L: OfficeLayout, cs: Cha
   px(g, L.queenRoom.x + 30, L.queenRoom.y + 46, 36, 10, '#6b5420') // Queen's desk
   px(g, L.queenRoom.x + 30, L.queenRoom.y + 46, 36, 2, '#8a6d2b')
 
-  for (const c of cs) {
-    const p = L.pos[c.sessionId]; if (!p) continue
+  const M = animate(L, cs, t)
+  const out: Record<string, { x: number; y: number }> = {}
+  for (const c of [...cs].sort((a, b) => (M.get(a.sessionId)?.y ?? 0) - (M.get(b.sessionId)?.y ?? 0))) {
+    const p = L.pos[c.sessionId], m = M.get(c.sessionId); if (!p || !m) continue
     // Walk-in animation for a fresh hire: slides in from the door (left edge) to the desk. Purely a reaction to the real hire time.
     let ox = 0
     if (c.fresh && c.hiredAt !== undefined) { const k = Math.min(1, Math.max(0, (t - firstSeen(c.sessionId, t)) / 2800)); ox = -(1 - k) * (p.x + 6) }
-    const cx = p.x + Math.round(ox), cy = p.y
-    const walking = ox !== 0
-    const step = walking ? Math.floor(t / 150) % 2 : 0
+    const cx = m.x + Math.round(ox), cy = m.y
+    const walking = ox !== 0 || m.moving
+    const step = m.moving ? m.step : walking ? Math.floor(t / 150) % 2 : 0
+    WALKING = walking; STEP = step; LOOK = m.moving ? m.dir : 0; TALK = m.talking
+    out[c.sessionId] = { x: cx, y: cy }
+    if (c.taskStatus && c.role === 'worker' && c.seat.kind === 'desk') px(g, p.x - 10, p.y + 12, 20, 2, c.taskStatus === 'verified' ? '#36b879' : c.taskStatus === 'failed' ? '#e45b5b' : c.taskStatus === 'working' ? '#69a7e8' : c.taskStatus === 'awaiting_verification' ? '#e8b44b' : '#737e8b') // task status bar stays with the desk
     g.save()
-    if (c.role === 'watchdog') { drawDog(g, cx, cy, c, frame, t); drawStatus(g, c, cx, cy - 17, frame); g.restore(); continue }
+    if (c.role === 'watchdog') { drawDog(g, cx, cy, c, frame, t); g.restore(); drawStatus(g, c, cx, cy - 17, frame); continue }
     if (c.role === 'queen') drawQueen(g, cx, cy, c, frame, t)
     else drawWorker(g, cx, cy, c, frame, step, walking, t)
     g.restore()
     drawStatus(g, c, cx, cy - (c.role === 'queen' ? 25 : 17), frame)
+    if (m.talking) chatBubble(g, cx + (c.role === 'queen' ? 8 : 7), cy - (c.role === 'queen' ? 20 : 15), t)
     if (c.fresh) { const k = Math.floor(t / 200) % 3; sparkle(g, cx - 9, cy - 8 + k, 1.6, '#ffe27a'); sparkle(g, cx + 9, cy - 4 - k, 1.2, '#fff'); sparkle(g, cx + 7, cy - 14 + k, 1.4, '#ffe27a') }
-    // task status bar under desk characters
-    if (c.taskStatus && c.role === 'worker' && c.seat.kind === 'desk') px(g, p.x - 10, p.y + 12, 20, 2, c.taskStatus === 'verified' ? '#36b879' : c.taskStatus === 'failed' ? '#e45b5b' : c.taskStatus === 'working' ? '#69a7e8' : c.taskStatus === 'awaiting_verification' ? '#e8b44b' : '#737e8b')
   }
+  WALKING = false; STEP = 0; LOOK = 0; TALK = false
+  return out
+}
+
+function chatBubble(g: CanvasRenderingContext2D, x: number, y: number, t: number) {
+  rr(g, x, y, 10, 6.4, 2.2, '#f4f6fa', OUT)
+  poly(g, [[x + 1.8, y + 6], [x + 3.8, y + 6], [x + 1.4, y + 8.2]], '#f4f6fa', OUT)
+  const n = Math.floor(t / 250) % 3 + 1
+  for (let i = 0; i < 3; i++) ell(g, x + 2.4 + i * 2.6, y + 3.2, 0.7, 0.7, i < n ? '#2b3340' : '#c3c9d3', null)
 }
 
 const seen = new Map<string, number>()
@@ -95,12 +113,13 @@ function eyes(g: CanvasRenderingContext2D, cx: number, ey: number, c: Character,
     if (c.state === 'error') { g.lineWidth = 0.6; g.lineCap = 'round'; g.strokeStyle = OUT; g.beginPath(); g.moveTo(x - 0.9, ey - 0.9); g.lineTo(x + 0.9, ey + 0.9); g.moveTo(x + 0.9, ey - 0.9); g.lineTo(x - 0.9, ey + 0.9); g.stroke(); continue }
     if (c.state === 'idle' || blink) { arc(g, x, ey - 0.3, 1.1 * size, 0.1, 0.9); continue }
     ell(g, x, ey, 1.5 * size, 1.8 * size, '#fff', OUT)
-    const dx = c.state === 'thinking' ? 0.5 : c.state === 'waiting' ? -0.5 * s : 0, dy = c.state === 'thinking' ? -0.6 : 0.2
+    const dx = (c.state === 'thinking' ? 0.5 : c.state === 'waiting' ? -0.5 * s : 0) + LOOK * 0.5, dy = c.state === 'thinking' ? -0.6 : 0.2
     ell(g, x + dx, ey + dy, 0.85 * size, 0.95 * size, OUT, null)
     ell(g, x + dx + 0.3, ey + dy - 0.35, 0.3 * size, 0.3 * size, '#fff', null)
   }
 }
 function mouth(g: CanvasRenderingContext2D, cx: number, my: number, c: Character, frame: number) {
+  if (TALK) { ell(g, cx, my, 1.2, frame ? 1.3 : 0.5, '#7a1d2b', OUT); return }
   switch (c.state) {
     case 'completed': ell(g, cx, my - 0.2, 1.7, 1.3, '#7a1d2b', OUT); poly(g, [[cx - 1.5, my - 0.6], [cx + 1.5, my - 0.6], [cx + 1.3, my + 0.2], [cx - 1.3, my + 0.2]], '#fff', null); break
     case 'meeting': frame ? ell(g, cx, my, 1.1, 1.0, '#7a1d2b', OUT) : arc(g, cx, my - 0.8, 1.6, 0.15, 0.85); break
@@ -150,17 +169,18 @@ function drawWorker(g: CanvasRenderingContext2D, cx: number, cy: number, c: Char
   const skin = SKINS[(seed >> 3) % SKINS.length], hair = HAIRS[(seed >> 5) % HAIRS.length]
   const style = HAIR_STYLES[(seed >> 7) % HAIR_STYLES.length]
   const idle = c.state === 'idle' || c.state === 'completed'
-  const bob = (c.state === 'working' || c.state === 'meeting' || walking) && (frame || step) ? 0.8 : 0
+  const bob = walking ? (step ? 0.8 : 0) : (c.state === 'working' || c.state === 'meeting') && frame ? 0.8 : 0
   const body = c.state === 'error' ? '#8a2a2a' : idle ? shade(shirt, -0.18) : shirt
   const hy = cy - 4.2 + bob
   ell(g, cx, cy + 8, 6.5, 1.5, '#00000044', null)                                                    // shadow
-  rr(g, cx - 3.6 + (step ? 0.8 : 0), cy + 5, 2.6, 3.4, 1.2, '#2b2f3a'); rr(g, cx + 1 - (step ? 0.8 : 0), cy + 5, 2.6, 3.4, 1.2, '#2b2f3a') // legs
+  rr(g, cx - 3.6 + (step ? 0.8 : 0), cy + 5 - (walking && step ? 1.4 : 0), 2.6, 3.4, 1.2, '#2b2f3a'); rr(g, cx + 1 - (step ? 0.8 : 0), cy + 5 - (walking && !step ? 1.4 : 0), 2.6, 3.4, 1.2, '#2b2f3a') // legs, alternating lift when walking
   rr(g, cx - 5, cy - 0.8 + bob, 10, 7.4, 3, body)                                                      // torso
   poly(g, [[cx - 1.8, cy - 0.7 + bob], [cx + 1.8, cy - 0.7 + bob], [cx, cy + 1.6 + bob]], '#fff', OUT)  // collar
   if (c.title === 'Head of workers') poly(g, [[cx - 0.5, cy + 1.2 + bob], [cx + 0.5, cy + 1.2 + bob], [cx + 0.9, cy + 4.6 + bob], [cx, cy + 5.4 + bob], [cx - 0.9, cy + 4.6 + bob]], '#e45b5b')
   else rr(g, cx - 3.4, cy + 4.2 + bob, 6.8, 1, 0.5, shade(shirt, 0.25), null)                           // hem stripe
   // arms + hands
-  if (c.state === 'working') { const a = frame ? 0 : 1; rr(g, cx - 6.4, cy + 2 + bob, 2.2, 4, 1.1, body); rr(g, cx + 4.2, cy + 2 + bob, 2.2, 4, 1.1, body); ell(g, cx - 5.3, cy + 6.4 - a, 1.4, 1.4, skin); ell(g, cx + 5.3, cy + 6.4 - (1 - a), 1.4, 1.4, skin) }
+  if (walking) { const w = step ? 1 : -1; rr(g, cx - 6.4, cy + 0.8 + bob + w * 0.9, 2.2, 5, 1.1, body); rr(g, cx + 4.2, cy + 0.8 + bob - w * 0.9, 2.2, 5, 1.1, body); ell(g, cx - 5.3, cy + 6.4 + bob + w * 0.9, 1.3, 1.3, skin); ell(g, cx + 5.3, cy + 6.4 + bob - w * 0.9, 1.3, 1.3, skin) } // arm swing
+  else if (c.state === 'working') { const a = frame ? 0 : 1; rr(g, cx - 6.4, cy + 2 + bob, 2.2, 4, 1.1, body); rr(g, cx + 4.2, cy + 2 + bob, 2.2, 4, 1.1, body); ell(g, cx - 5.3, cy + 6.4 - a, 1.4, 1.4, skin); ell(g, cx + 5.3, cy + 6.4 - (1 - a), 1.4, 1.4, skin) }
   else if (c.state === 'meeting') { rr(g, cx - 6.4, cy + 1 + bob, 2.2, 5, 1.1, body); ell(g, cx - 5.3, cy + 6.4 + bob, 1.4, 1.4, skin); g.save(); g.translate(cx + 5, cy + 1 + bob); g.rotate(frame ? -2.4 : -2.9); rr(g, -1.1, 0, 2.2, 5, 1.1, body); ell(g, 0, 5.2, 1.4, 1.4, skin); g.restore() } // waving
   else if (c.state === 'blocked') { rr(g, cx - 6.4, cy + 1 + bob, 2.2, 5, 1.1, body); ell(g, cx - 5.3, cy + 6.4 + bob, 1.4, 1.4, skin); g.save(); g.translate(cx + 5, cy + 1 + bob); g.rotate(-2.9); rr(g, -1.1, 0, 2.2, 5, 1.1, body); ell(g, 0, 5.4, 1.7, 1.7, '#e45b5b'); g.restore() } // stop hand
   else if (c.state === 'completed') { rr(g, cx - 6.4, cy + 1 + bob, 2.2, 5, 1.1, body); g.save(); g.translate(cx + 5, cy + 1 + bob); g.rotate(-2.5); rr(g, -1.1, 0, 2.2, 5, 1.1, body); ell(g, 0, 5.3, 1.4, 1.4, skin); g.restore(); ell(g, cx - 5.3, cy + 6.4 + bob, 1.4, 1.4, skin) }
@@ -180,14 +200,14 @@ function drawWorker(g: CanvasRenderingContext2D, cx: number, cy: number, c: Char
 
 function drawQueen(g: CanvasRenderingContext2D, cx: number, cy: number, c: Character, frame: number, t: number) {
   const idle = c.state === 'idle' || c.state === 'completed'
-  const flap = c.state === 'working' || c.state === 'meeting' || c.state === 'thinking' ? (frame ? 1 : 0.7) : 0.85
-  const bob = (c.state === 'working' || c.state === 'meeting') && frame ? 0.8 : 0
+  const flap = WALKING ? (STEP ? 1 : 0.7) : c.state === 'working' || c.state === 'meeting' || c.state === 'thinking' ? (frame ? 1 : 0.7) : 0.85
+  const bob = WALKING ? (STEP ? 0.8 : 0) : (c.state === 'working' || c.state === 'meeting') && frame ? 0.8 : 0
   const skin = '#f6d7b8', gold = '#f5b942', body = c.state === 'error' ? '#8a2a2a' : idle ? '#d9a032' : gold
   g.translate(cx, cy + 8); g.scale(1.18, 1.18); g.translate(-cx, -(cy + 8))
   ell(g, cx, cy + 8, 7.5, 1.7, '#00000044', null)
   // wings
   for (const s of [-1, 1]) { g.save(); g.translate(cx + s * 3.5, cy + 1 + bob); g.rotate(s * (0.5 + (1 - flap) * 0.5)); ell(g, s * 4.4, -3.4, 3.2 * flap + 0.6, 6, 'rgba(190,230,255,0.75)', '#5b7fa0'); ell(g, s * 4, -5.2, 1, 2, 'rgba(255,255,255,0.7)', null); g.restore() }
-  rr(g, cx - 3.6, cy + 5, 2.6, 3.4, 1.2, '#2b2f3a'); rr(g, cx + 1, cy + 5, 2.6, 3.4, 1.2, '#2b2f3a')
+  rr(g, cx - 3.6, cy + 5 - (WALKING && STEP ? 1.4 : 0), 2.6, 3.4, 1.2, '#2b2f3a'); rr(g, cx + 1, cy + 5 - (WALKING && !STEP ? 1.4 : 0), 2.6, 3.4, 1.2, '#2b2f3a')
   // striped bee body
   g.save(); g.beginPath(); g.roundRect(cx - 5.4, cy - 1 + bob, 10.8, 7.8, 3.4); g.clip()
   g.fillStyle = body; g.fillRect(cx - 6, cy - 2 + bob, 12, 10)
@@ -245,15 +265,16 @@ function drawDog(g: CanvasRenderingContext2D, cx: number, cy: number, c: Charact
   const rex = c.name === 'Rex'
   const fur = rex ? '#c98f56' : '#7f8896', furDark = rex ? '#7a4a24' : '#4b525e', light = rex ? '#f6e3c4' : '#eef2f7'
   const hy = cy - 4.4
-  const wag = alert ? (frame ? 1 : -1) : Math.sin(t / 700) * 0.15
+  const wag = WALKING ? Math.sin(t / 110) * 0.8 : alert ? (frame ? 1 : -1) : Math.sin(t / 700) * 0.15
   ell(g, cx, cy + 8, 8, 1.7, '#00000044', null)
+  g.translate(cx, cy + 8); g.rotate(LOOK * (alert ? 0.14 : 0.07)); g.translate(-cx, -(cy + 8 + (WALKING ? (STEP ? 0.9 : 0) : 0)))
   // tail
   g.save(); g.translate(cx + 5.6, cy + 5); g.rotate(-0.9 + wag * 0.9)
   rr(g, -0.8, -6, 2.6, 6.8, 1.3, rex ? furDark : fur); if (!rex) rr(g, -0.8, -6, 2.6, 2, 1, light, OUT); else rr(g, -0.8, -6, 2.6, 2, 1, light, OUT)
   g.restore()
   // body + chest + paws
   ell(g, cx, cy + 3.8, 5.6, 5.0, fur); ell(g, cx, cy + 4.6, 3.2, 3.6, light, null)
-  ell(g, cx - 2.6, cy + 8, 1.9, 1.3, light); ell(g, cx + 2.6, cy + 8, 1.9, 1.3, light)
+  ell(g, cx - 2.6, cy + 8 - (WALKING && STEP ? 1.5 : 0), 1.9, 1.3, light); ell(g, cx + 2.6, cy + 8 - (WALKING && !STEP ? 1.5 : 0), 1.9, 1.3, light)
   if (!rex) { poly(g, [[cx + 3.2, cy + 0.6], [cx + 5, cy + 0.8], [cx + 4, cy + 2.6], [cx + 5.4, cy + 2.8], [cx + 3, cy + 5.8], [cx + 3.6, cy + 3.4], [cx + 2.6, cy + 3.2]], '#ffd54a', null) } // lightning flash on the flank
   // ears (behind head)
   if (rex) { for (const s of [-1, 1]) { g.save(); g.translate(cx + s * 5.2, hy - 1.4); g.rotate(s * (alert ? (frame ? -0.35 : -0.15) : 0.35)); ell(g, 0, alert ? 1.4 : 2.6, 1.9, alert ? 3.2 : 3.8, furDark); g.restore() } }

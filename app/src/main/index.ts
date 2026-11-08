@@ -49,16 +49,18 @@ app.whenReady().then(async () => {
   })
   const staff = new Staff(store.raw, taskStore)
   const liveStatus = new Set(['spawning', 'idle', 'working'])
+  staff.alive = (sid) => { const x = store.listSessions().find((y) => y.id === sid); return !!x && liveStatus.has(x.status) }
   const chat = new Chat(store.raw, taskStore, staff, (id) => watchdog?.alerts(id) ?? [],
     (sid) => { const x = store.listSessions().find((y) => y.id === sid); return !!x && liveStatus.has(x.status) },
     (sid, text) => need(sessions).send(sid, text))
   if (sessions) new Orchestrator(control, sessions, taskStore, undefined, skills, intel, staff)
-  ipcMain.handle('staff:state', (_e, runId: string) => ({ hires: staff.list(runId), economy: staff.economy(runId), titles: TITLES }))
+  ipcMain.handle('staff:state', (_e, runId: string) => ({ hires: staff.list(runId), titles: TITLES }))
   ipcMain.handle('staff:hire', (_e, runId: string, name: string, title: string, profile?: HireProfile) => {
     if (!store.listSessions().some((x) => x.id === runId && x.role === 'queen')) throw new Error('unknown Queen')
     return staff.hire(runId, String(name ?? ''), String(title ?? ''), profile ?? {})
   })
   ipcMain.handle('staff:configure', (_e, hireId: string, profile: HireProfile) => staff.configure(String(hireId), profile ?? {}))
+  ipcMain.handle('staff:remove', (_e, hireId: string) => staff.remove(String(hireId)))
   ipcMain.handle('chat:list', (_e, runId: string) => chat.list(runId))
   ipcMain.handle('chat:post', (_e, runId: string, to: string, text: string, thread?: string) => chat.post(runId, String(to), String(text), thread))
   ipcMain.handle('skills:list', (_e, root?: string) => skills.scan(root))
@@ -88,7 +90,7 @@ app.whenReady().then(async () => {
     for (const id of ids) { const e = store.lastActivityEvent(id); if (e) last[id] = e }
     const files = queenId ? (store.raw.prepare('SELECT ts,path,kind,source,sessions FROM file_activity WHERE run_id=? ORDER BY id DESC LIMIT 60').all(queenId) as any[]).map((r) => ({ ts: r.ts, path: r.path, kind: r.kind, source: r.source, sessions: JSON.parse(r.sessions) as string[] })) : []
     return {
-      now: Date.now(), queenId, sessions: sess, hires: queenId ? (() => { const busy = staff.busyIds(); const mine = new Set(tasks.map((t) => t.assignee)); return staff.list(queenId).map((h) => ({ ...h, elsewhere: busy.has(h.id) && !mine.has(h.sessionId) })) })() : [], economy: queenId ? staff.economy(queenId) : null,
+      now: Date.now(), queenId, sessions: sess, hires: queenId ? (() => { const busy = staff.busyIds(); const mine = new Set(tasks.map((t) => t.assignee)); return staff.list(queenId).map((h) => ({ ...h, elsewhere: busy.has(h.id) && !mine.has(h.sessionId) })) })() : [], 
       tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee, scope: t.scope })),
       pending: control.pending(), alerts: queenId ? watchdog?.alerts(queenId) ?? [] : [],
       messages: queenId ? taskStore.messages(queenId).slice(-60) : [], last, files, assignments: queenId ? skills.assignments(queenId) : []

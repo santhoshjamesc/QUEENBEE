@@ -154,9 +154,9 @@ export class Orchestrator implements ToolProvider {
       skillNote = ` with skills: ${chosen.map((s) => s.name).join(', ')}`
     }
     const brief = this.brief(t) + (await this.codeBrief(reg.projectRoot, t))
-    // Staff: if the boss hired people, the task goes to one of them (never to an anonymous worker).
+    // Staff: tasks only go to workers the boss hired. Queen never creates workers herself.
     const hire = this.staff?.pickFree(runId, workerName, t.scope)
-    if (this.staff && !hire && this.staff.list(runId).length) throw new Error('all hired staff are busy; ask the boss to hire another worker or wait for someone to finish')
+    if (this.staff && !hire) throw new Error(this.staff.list(runId).length ? 'all hired staff are busy; ask the boss to hire another worker (or wait for someone to finish). Do not create workers yourself.' : 'no staff are hired yet. Ask the boss to hire the worker you need (name the role, e.g. Senior developer, QA, Code reviewer). Do not create workers yourself.')
     if (hire) {
       prompt += `\nYour name is ${hire.name}. Your job title is ${hire.title}.${hire.title === 'Head of workers' ? ' You may coordinate other workers by messaging them through Queen-approved channels.' : ''} Reply to the boss in short, plain chat messages.`
       if (hire.focus) prompt += `\nYour focus: ${hire.focus}.`
@@ -215,4 +215,4 @@ export class Orchestrator implements ToolProvider {
   }
 }
 
-export const WORKER_PROMPT = `You are a worker agent coordinated by Queen. Do only your assigned task, stay inside its scope, and never claim completion without calling mcp__queen__report_done. If you need something outside your scope, message Queen instead of doing it.`
+export const WORKER_PROMPT = `You are a worker agent coordinated by Queen. Do only your assigned task, stay inside its scope, and never claim completion without calling mcp__queen__report_done. If you need something outside your scope, message Queen instead of doing it. CHAT STYLE: every chat message you write (to the boss, to Queen or to workers, and every question) must be short, simple and easy to understand: plain everyday words, 1-2 short sentences, no jargon, no long lists, no lecture.`

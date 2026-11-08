@@ -18,7 +18,7 @@ describe('LineParser', () => {
 })
 
 describe('db', () => {
-  it('migrates idempotently', () => { const d = openDb(':memory:'); expect(d.prepare('select max(v) v from schema_version').get()).toEqual({ v: 8 }) })
+  it('migrates idempotently', () => { const d = openDb(':memory:'); expect(d.prepare('select max(v) v from schema_version').get()).toEqual({ v: 9 }) })
 })
 
 describe('SessionManager with fake claude', () => {
